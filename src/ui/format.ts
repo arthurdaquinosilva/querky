@@ -235,10 +235,8 @@ export function fmtHelp(data: HelpData): string {
 export function fmtErd(data: ErdData): string {
   if (data.tables.length === 0) return dim('No tables found in the current schema.');
 
-  const termW = process.stdout.columns ?? 80;
   const FK_PREFIX = 'FK → ';
   const PAD = 1;
-  const GAP = 2;
 
   const colorMap = new Map(
     data.tables.map((t, i) => [t.name, ERD_PALETTE[i % ERD_PALETTE.length]])
@@ -293,32 +291,13 @@ export function fmtErd(data: ErdData): string {
     return out;
   }
 
-  // Group tables into rows that fit the terminal width left-to-right
-  const rows: number[][] = [];
-  let row: number[] = [], usedW = 0;
-  for (let i = 0; i < allMetrics.length; i++) {
-    const w = allMetrics[i].totalW;
-    if (row.length === 0) { row.push(i); usedW = w; }
-    else if (usedW + GAP + w <= termW) { row.push(i); usedW += GAP + w; }
-    else { rows.push(row); row = [i]; usedW = w; }
-  }
-  if (row.length > 0) rows.push(row);
-
+  // Stack tables vertically, one per line, with a blank line between them
   const output: string[] = [];
-  for (const tableRow of rows) {
-    const blocks = tableRow.map((ti) =>
-      renderTable(data.tables[ti], allMetrics[ti], colorMap.get(data.tables[ti].name) ?? ERD_PALETTE[0])
-    );
-    const height = Math.max(...blocks.map((b) => b.length));
-    for (let line = 0; line < height; line++) {
-      const parts = blocks.map((b, j) => {
-        const l = b[line] ?? ' '.repeat(allMetrics[tableRow[j]].totalW);
-        return j < blocks.length - 1 ? l + ' '.repeat(GAP) : l;
-      });
-      output.push(parts.join(''));
-    }
+  data.tables.forEach((t, ti) => {
+    const block = renderTable(t, allMetrics[ti], colorMap.get(t.name) ?? ERD_PALETTE[0]);
+    output.push(...block);
     output.push('');
-  }
+  });
 
   return output.join('\n').trimEnd();
 }
