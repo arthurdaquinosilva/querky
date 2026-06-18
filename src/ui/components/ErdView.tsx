@@ -14,7 +14,6 @@ const TABLE_COLORS = [
 
 const BORDER = '#4b5563';
 const PAD = 1;
-const GAP = 2;
 const FK_PREFIX = 'FK → ';
 
 interface Metrics {
@@ -37,24 +36,6 @@ function computeMetrics(table: ErdTable): Metrics {
   );
   const totalW = 4 + 3 * PAD * 2 + nameW + typeW + keyW;
   return { nameW, typeW, keyW, totalW };
-}
-
-function groupIntoRows(metrics: Metrics[], termW: number): number[][] {
-  const rows: number[][] = [];
-  let row: number[] = [];
-  let usedW = 0;
-  for (let i = 0; i < metrics.length; i++) {
-    const w = metrics[i].totalW;
-    if (row.length === 0) {
-      row.push(i); usedW = w;
-    } else if (usedW + GAP + w <= termW) {
-      row.push(i); usedW += GAP + w;
-    } else {
-      rows.push(row); row = [i]; usedW = w;
-    }
-  }
-  if (row.length > 0) rows.push(row);
-  return rows;
 }
 
 interface TableBoxProps {
@@ -113,27 +94,21 @@ export function ErdView({ data }: { data: ErdData }) {
     return <Text dimColor>No tables found in the current schema.</Text>;
   }
 
-  const termW = process.stdout.columns ?? 80;
   const metrics = data.tables.map(computeMetrics);
   const colorMap = new Map(
     data.tables.map((t, i) => [t.name, TABLE_COLORS[i % TABLE_COLORS.length]]),
   );
-  const rows = groupIntoRows(metrics, termW);
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      {rows.map((row, ri) => (
-        <Box key={ri} flexDirection="row" marginBottom={ri < rows.length - 1 ? 1 : 0}>
-          {row.map((ti, j) => (
-            <Box key={ti} marginRight={j < row.length - 1 ? GAP : 0}>
-              <TableBox
-                table={data.tables[ti]}
-                m={metrics[ti]}
-                color={colorMap.get(data.tables[ti].name) ?? BORDER}
-                colorMap={colorMap}
-              />
-            </Box>
-          ))}
+      {data.tables.map((table, ti) => (
+        <Box key={table.name} marginBottom={ti < data.tables.length - 1 ? 1 : 0}>
+          <TableBox
+            table={table}
+            m={metrics[ti]}
+            color={colorMap.get(table.name) ?? BORDER}
+            colorMap={colorMap}
+          />
         </Box>
       ))}
     </Box>
