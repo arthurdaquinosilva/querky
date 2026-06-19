@@ -5,19 +5,11 @@ import { theme } from '../theme.js';
 declare const __PKG_VERSION__: string;
 const version = typeof __PKG_VERSION__ !== 'undefined' ? __PKG_VERSION__ : (process.env.npm_package_version ?? 'unknown');
 
-const MASCOT = [
-  ' ▗▄▄▄▄▄▖',
-  '▐░ ● ● ░▌',
-  '▐░ ◡◡◡ ░▌',
-  '▐░   ▗▟▌',
-  ' ▀▀▀▀▝▀▄',
-];
-
 const WORDMARK = [
   '▗▄▄▄▖ ▗▖ ▗▖▗▄▄▄▖▗▄▄▖ ▗▖ ▗▖▗▖  ▗▖',
   '▐▌ ▐▌ ▐▌ ▐▌▐▌   ▐▌ ▐▌▐▌▗▞▘ ▝▚▞▘',
   '▐▌ ▐▌ ▐▌ ▐▌▐▛▀▀▘▐▛▀▚▖▐▛▚▖   ▐▌',
-  '▐▙▄▟▙▖▝▚▄▞▘▐▙▄▄▖▐▌ ▐▌▐▌ ▐▌  ▐▌',
+  '▐▙▄▟▙▖▝▚▄▞▘▐▙▄▄▖▐▌ ▐▌▐▌ ▐▌  ▐▌ ▄▄▄',
 ];
 
 const WORDMARK_WIDTH = Math.max(...WORDMARK.map((l) => [...l].length));
@@ -53,28 +45,17 @@ export function Banner({ connectionState }: BannerProps) {
 
   return (
     <Box flexDirection="column" marginTop={2} marginBottom={1}>
-      <Box flexDirection="row">
-        {/* Mascot Q — per-line gradient */}
-        <Box flexDirection="column" marginRight={2}>
-          {MASCOT.map((line, i) => (
-            <Text key={i} color={GRADIENT[i]} bold>
-              {line}
-            </Text>
-          ))}
-        </Box>
-
-        {/* Wordmark — horizontal magenta→orange gradient, aligned to mascot face */}
-        <Box flexDirection="column" marginTop={1}>
-          {WORDMARK.map((line, li) => (
-            <Box key={li}>
-              {[...line].map((ch, x) => (
-                <Text key={x} color={gradientColor(WORDMARK_WIDTH > 1 ? x / (WORDMARK_WIDTH - 1) : 0)} bold>
-                  {ch}
-                </Text>
-              ))}
-            </Box>
-          ))}
-        </Box>
+      {/* Wordmark — horizontal magenta→orange gradient, with trailing cursor */}
+      <Box flexDirection="column">
+        {WORDMARK.map((line, li) => (
+          <Box key={li}>
+            {[...line].map((ch, x) => (
+              <Text key={x} color={gradientColor(WORDMARK_WIDTH > 1 ? x / (WORDMARK_WIDTH - 1) : 0)} bold>
+                {ch}
+              </Text>
+            ))}
+          </Box>
+        ))}
       </Box>
 
       {/* Info — stacked below */}
