@@ -13,7 +13,7 @@ const WORDMARK = [
 ];
 
 
-const WORDMARK_COLOR = '#d75f87'; // habamax Constant — pink-red
+const WORDMARK_COLOR = '#d75f87';
 
 interface BannerProps {
   connectionState: ConnectionState;

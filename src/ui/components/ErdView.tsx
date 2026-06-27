@@ -2,14 +2,14 @@ import { Box, Text } from 'ink';
 import type { ErdData, ErdTable } from '../../db/erd.js';
 
 const TABLE_COLORS = [
-  '#d75f87',  // habamax Constant — pink-red
-  '#5faf5f',  // habamax String — green
-  '#87afaf',  // habamax Identifier — teal
-  '#af87af',  // habamax Statement — purple
-  '#af875f',  // habamax PreProc — ochre
-  '#d7af87',  // habamax Question — warm yellow
-  '#5f87af',  // habamax Type — blue
-  '#5f8787',  // habamax Special — dark teal
+  '#d75f87',
+  '#5faf5f',
+  '#87afaf',
+  '#af87af',
+  '#af875f',
+  '#d7af87',
+  '#5f87af',
+  '#5f8787',
 ];
 
 const BORDER = '#767676';
