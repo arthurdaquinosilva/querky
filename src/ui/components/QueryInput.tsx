@@ -29,7 +29,7 @@ function FuzzyHighlight({ text, token, selected }: { text: string; token: string
 }
 
 const BG = '#1e1e1e';
-const ACCENT = '#818cf8';
+const ACCENT = theme.insertMode;
 const PROMPT_MUTED = '#6b7280';
 const PLACEHOLDER = '#4b5563';
 const KW_COLOR = '#a5b4fc';
