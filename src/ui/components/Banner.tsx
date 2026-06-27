@@ -15,11 +15,9 @@ const WORDMARK = [
 const WORDMARK_WIDTH = Math.max(...WORDMARK.map((l) => [...l].length));
 
 const GRADIENT = [
-  '#ff00dd',
-  '#ff33bb',
-  '#ff6699',
-  '#ff9966',
-  '#ff7722',
+  '#af87af',  // habamax Statement — muted purple
+  '#87afaf',  // habamax Identifier — muted teal
+  '#5faf5f',  // habamax String — muted green
 ];
 
 function hexToRgb(hex: string): [number, number, number] {
