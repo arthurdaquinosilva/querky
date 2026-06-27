@@ -2,8 +2,6 @@
 
 A quirky terminal SQL client with vim keybindings, schema-aware autocomplete, query aliases, and AI-powered query explanation.
 
-![Querky](./readme-cover.png)
-
 ## Features
 
 - **Beautiful tables** — clean, aligned output with automatic expanded mode for wide results
