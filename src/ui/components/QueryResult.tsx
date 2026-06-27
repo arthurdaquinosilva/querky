@@ -4,7 +4,7 @@ import type { QueryState } from '../../db/query.js';
 import { Table, cellValue, colWidths } from './Table.js';
 import { theme } from '../theme.js';
 
-const ERROR_FG = '#ff4444';
+const ERROR_FG = theme.error;
 
 export function ErrorBox({ message }: { message: string }) {
   const lines = message.split('\n');

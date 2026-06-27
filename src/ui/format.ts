@@ -4,6 +4,7 @@
 import type { QueryState } from '../db/query.js';
 import type { ErdData } from '../db/erd.js';
 import type { HelpData } from '../commands/router.js';
+import { theme } from './theme.js';
 
 // ── ANSI helpers ─────────────────────────────────────────────────────────────
 
@@ -24,19 +25,25 @@ function dim(s: string): string { return DIM + s + R; }
 function cbold(hex: string, s: string): string { return fg(hex) + BOLD + s + R; }
 function cdim(hex: string, s: string): string { return fg(hex) + DIM + s + R; }
 
-const ACCENT       = '#818cf8';
-const HEADER_COL   = '#9ca3af';
-const NULL_COL     = '#6366f1';
-const INDIGO       = '#818cf8';
-const AI_COL       = '#a5b4fc';
-const ERROR_COL    = '#ff4444';
-const WARN_COL     = '#f59e0b';
-const SHELL_COL    = '#22d3ee';
-const ERD_BORDER   = '#4b5563';
+const ACCENT     = theme.accent;
+const HEADER_COL = theme.muted;
+const NULL_COL   = theme.muted;
+const INDIGO     = theme.accent;
+const AI_COL     = theme.insertMode;
+const ERROR_COL  = theme.error;
+const WARN_COL   = theme.warning;
+const SHELL_COL  = theme.shellMode;
+const ERD_BORDER = '#767676';
 
 const ERD_PALETTE = [
-  '#f472b6','#34d399','#fb923c','#60a5fa',
-  '#a78bfa','#f87171','#fbbf24','#2dd4bf',
+  '#d75f87',
+  '#5faf5f',
+  '#87afaf',
+  '#af87af',
+  '#af875f',
+  '#d7af87',
+  '#5f87af',
+  '#5f8787',
 ];
 
 const NULL_MARKER = '∅';

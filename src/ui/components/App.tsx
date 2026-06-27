@@ -19,8 +19,8 @@ import { theme } from '../theme.js';
 import type { VimMode } from '../hooks/useVimInput.js';
 import { fmtEntry, type EntryData } from '../format.js';
 
-const PLACEHOLDER = '#a5b4fc';
-const QUERY_HEADER_COLOR = '#9ca3af';
+const PLACEHOLDER = theme.muted;
+const QUERY_HEADER_COLOR = theme.muted;
 
 // What the dynamic (prompt) area shows while work is in flight
 type ActiveState =

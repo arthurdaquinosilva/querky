@@ -30,12 +30,12 @@ function FuzzyHighlight({ text, token, selected }: { text: string; token: string
 
 const BG = '#1e1e1e';
 const ACCENT = theme.insertMode;
-const PROMPT_MUTED = '#6b7280';
-const PLACEHOLDER = '#4b5563';
-const KW_COLOR = '#a5b4fc';
-const STR_COLOR = '#fb923c';
-const NUM_COLOR = '#86efac';
-const CMT_COLOR = '#6b7280';
+const PROMPT_MUTED = theme.muted;
+const PLACEHOLDER = '#585858';
+const KW_COLOR = '#af87af';
+const STR_COLOR = '#5faf5f';
+const NUM_COLOR = '#d7af87';
+const CMT_COLOR = '#767676';
 
 function sqlTokenColor(type: TokenType): string | undefined {
   if (type === 'keyword') return KW_COLOR;
