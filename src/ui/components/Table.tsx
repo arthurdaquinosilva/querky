@@ -1,9 +1,10 @@
 import { Box, Text } from 'ink';
+import { theme } from '../theme.js';
 
 const COL_PAD = 1;
-const INDIGO = '#818cf8';
-const BORDER = 'white';
-const NULL_COLOR = '#6366f1';
+const HEADER_COLOR = theme.accent;
+const BORDER = '#9e9e9e';
+const NULL_COLOR = theme.muted;
 
 const NULL_MARKER = '∅';
 
@@ -59,7 +60,7 @@ function ExpandedTable({ columns, rows }: { columns: string[]; rows: Record<stri
           <Text color={BORDER}>{`─[ Record ${i + 1} ]${'─'.repeat(Math.max(0, keyWidth + 14 - String(i + 1).length))}`}</Text>
           {columns.map((col) => (
             <Box key={col}>
-              <Text color={INDIGO} bold>{col.padEnd(keyWidth)}</Text>
+              <Text color={HEADER_COLOR} bold>{col.padEnd(keyWidth)}</Text>
               <Text color={BORDER}>{' │ '}</Text>
               {isNull(row[col])
                 ? <Text color={NULL_COLOR} dimColor>{NULL_MARKER}</Text>
@@ -87,7 +88,7 @@ export function Table({ columns, rows, expanded = false }: TableProps) {
         <Text color={BORDER}>│</Text>
         {cols.map((v, i) => (
           <Box key={i}>
-            <Text color={INDIGO} bold>{' '.repeat(COL_PAD) + pad(v, widths[i]) + ' '.repeat(COL_PAD)}</Text>
+            <Text color={HEADER_COLOR} bold>{' '.repeat(COL_PAD) + pad(v, widths[i]) + ' '.repeat(COL_PAD)}</Text>
             <Text color={BORDER}>│</Text>
           </Box>
         ))}

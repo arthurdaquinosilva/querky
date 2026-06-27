@@ -2,17 +2,17 @@ import { Box, Text } from 'ink';
 import type { ErdData, ErdTable } from '../../db/erd.js';
 
 const TABLE_COLORS = [
-  '#f472b6',
-  '#34d399',
-  '#fb923c',
-  '#60a5fa',
-  '#a78bfa',
-  '#f87171',
-  '#fbbf24',
-  '#2dd4bf',
+  '#d75f87',  // habamax Constant — pink-red
+  '#5faf5f',  // habamax String — green
+  '#87afaf',  // habamax Identifier — teal
+  '#af87af',  // habamax Statement — purple
+  '#af875f',  // habamax PreProc — ochre
+  '#d7af87',  // habamax Question — warm yellow
+  '#5f87af',  // habamax Type — blue
+  '#5f8787',  // habamax Special — dark teal
 ];
 
-const BORDER = '#4b5563';
+const BORDER = '#767676';
 const PAD = 1;
 const FK_PREFIX = 'FK → ';
 
