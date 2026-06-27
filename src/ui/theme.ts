@@ -1,5 +1,5 @@
 export const theme = {
-  accent: '#af87af',
+  accent: '#d75f87',
   insertMode: '#87afaf',
   normalMode: '#af875f',
   shellMode: '#5faf5f',
