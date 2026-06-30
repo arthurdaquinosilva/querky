@@ -1,6 +1,6 @@
 {
   "name": "@deaquinodev/querky",
-  "version": "0.4.18",
+  "version": "0.4.19",
   "description": "A quirky terminal SQL client with vim mode, AI features, and schema-aware autocomplete",
   "main": "dist/index.js",
   "files": [
