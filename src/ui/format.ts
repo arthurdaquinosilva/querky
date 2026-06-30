@@ -12,17 +12,10 @@ const R = '\x1B[0m';
 const BOLD = '\x1B[1m';
 const DIM = '\x1B[2m';
 
-const ANSI_FG: Record<string, string> = {
-  black: '\x1B[30m', red: '\x1B[31m', green: '\x1B[32m', yellow: '\x1B[33m',
-  blue: '\x1B[34m', magenta: '\x1B[35m', cyan: '\x1B[36m', white: '\x1B[37m',
-  grey: '\x1B[90m', gray: '\x1B[90m',
-};
-
-function fg(color: string): string {
-  if (color in ANSI_FG) return ANSI_FG[color];
-  const r = parseInt(color.slice(1, 3), 16);
-  const g = parseInt(color.slice(3, 5), 16);
-  const b = parseInt(color.slice(5, 7), 16);
+function fg(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
   return `\x1B[38;2;${r};${g};${b}m`;
 }
 
@@ -40,17 +33,17 @@ const AI_COL     = theme.insertMode;
 const ERROR_COL  = theme.error;
 const WARN_COL   = theme.warning;
 const SHELL_COL  = theme.shellMode;
-const ERD_BORDER = '#585b70';
+const ERD_BORDER = '#767676';
 
 const ERD_PALETTE = [
-  '#cba6f7',
-  '#a6e3a1',
-  '#89b4fa',
-  '#f38ba8',
-  '#fab387',
-  '#94e2d5',
-  '#f9e2af',
-  '#f5c2e7',
+  '#d75f87',
+  '#5faf5f',
+  '#87afaf',
+  '#af87af',
+  '#af875f',
+  '#d7af87',
+  '#5f87af',
+  '#5f8787',
 ];
 
 const NULL_MARKER = '∅';

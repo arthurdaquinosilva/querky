@@ -13,7 +13,7 @@ const WORDMARK = [
 ];
 
 
-const WORDMARK_COLOR = theme.logo;
+const WORDMARK_COLOR = '#d75f87';
 
 interface BannerProps {
   connectionState: ConnectionState;

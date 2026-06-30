@@ -32,10 +32,10 @@ const BG = '#1e1e1e';
 const ACCENT = theme.insertMode;
 const PROMPT_MUTED = theme.muted;
 const PLACEHOLDER = '#585858';
-const KW_COLOR = '#cba6f7';
-const STR_COLOR = '#a6e3a1';
-const NUM_COLOR = '#fab387';
-const CMT_COLOR = '#6c7086';
+const KW_COLOR = '#af87af';
+const STR_COLOR = '#5faf5f';
+const NUM_COLOR = '#d7af87';
+const CMT_COLOR = '#767676';
 
 function sqlTokenColor(type: TokenType): string | undefined {
   if (type === 'keyword') return KW_COLOR;
