@@ -1,5 +1,7 @@
 # Querky
 
+![Querky Cover](querky-cover.png)
+
 A quirky terminal SQL client with vim keybindings, schema-aware autocomplete, query aliases, and AI-powered query explanation.
 
 ## Features
