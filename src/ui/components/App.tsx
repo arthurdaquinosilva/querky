@@ -4,46 +4,25 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Box, Static, Text, useApp, useInput, useStdin } from 'ink';
 import type { ConnectionState, DbResult } from '../../db/client.js';
-import { runQuery, type QueryState } from '../../db/query.js';
-import { runCommand, type HelpData } from '../../commands/router.js';
-import { fetchErd, type ErdData } from '../../db/erd.js';
+import { runQuery } from '../../db/query.js';
+import { runCommand } from '../../commands/router.js';
+import { fetchErd, focusErd } from '../../db/erd.js';
 import { runShell } from '../../commands/shell.js';
 import { streamExplain } from '../../ai/client.js';
 import { loadHistory, saveHistory, addToHistory } from '../../config/history.js';
 import { getAllAliases, saveAlias, deleteAlias, makeScope } from '../../config/aliases.js';
+import { loadSettings } from '../../config/settings.js';
 import { fetchSchema, type Schema } from '../../db/schema.js';
 import { QueryInput } from './QueryInput.js';
-import { ErrorBox } from './QueryResult.js';
 import { Banner } from './Banner.js';
-import { theme } from '../theme.js';
-import type { VimMode } from '../hooks/useVimInput.js';
-import { fmtEntry, type EntryData } from '../format.js';
-
-const PLACEHOLDER = theme.muted;
-const QUERY_HEADER_COLOR = theme.muted;
+import { Spinner } from './Spinner.js';
+import { fmtEntry, fmtPromptEcho, fmtBody, fmtError, type EntryData } from '../format.js';
 
 // What the dynamic (prompt) area shows while work is in flight
 type ActiveState =
   | { type: 'idle' }
   | { type: 'loading'; label: string; query: string }
   | { type: 'streaming'; query: string; text: string; error: string | null };
-
-function QueryHeader({ label, query }: { label: string; query: string }) {
-  const isMultiLine = query.includes('\n');
-  if (isMultiLine) {
-    return (
-      <Box flexDirection="column">
-        <Text><Text color={theme.accent} bold>{'● '}</Text><Text color={QUERY_HEADER_COLOR} bold>{label}:</Text></Text>
-        {query.split('\n').map((line, i) => (
-          <Text key={i} color={QUERY_HEADER_COLOR} bold>{'  '}{line}</Text>
-        ))}
-      </Box>
-    );
-  }
-  return (
-    <Text><Text color={theme.accent} bold>{'● '}</Text><Text color={QUERY_HEADER_COLOR} bold>{label}({query})</Text></Text>
-  );
-}
 
 interface AppProps {
   connectionState: ConnectionState;
@@ -64,8 +43,8 @@ export function App({ connectionState, aiUrl, aiModel, aiKey, onChangeDatabase }
   const [lastSqlQuery, setLastSqlQuery] = useState('');
   const [lastResult, setLastResult] = useState<DbResult | null>(null);
   const [lastResultPage, setLastResultPage] = useState(0);
-  const [vimMode, setVimMode] = useState<VimMode>('INSERT');
-  const [inputIsShell, setInputIsShell] = useState(false);
+  const [exitArmed, setExitArmed] = useState(false);
+  const [settings] = useState(loadSettings);
   const [vimEnabled, setVimEnabled] = useState(true);
   const [history, setHistory] = useState<string[]>(() => loadHistory());
   const [schema, setSchema] = useState<Schema | null>(null);
@@ -114,9 +93,23 @@ export function App({ connectionState, aiUrl, aiModel, aiKey, onChangeDatabase }
     return () => { process.stdout.write('\x1B[?25h'); };
   }, [isRawModeSupported]);
 
+  // Claude Code semantics: Ctrl+C clears the prompt (handled by the input), and on an
+  // empty prompt the first press arms exit and a second one within a moment quits.
+  useEffect(() => {
+    if (!exitArmed) return;
+    const t = setTimeout(() => setExitArmed(false), 1500);
+    return () => clearTimeout(t);
+  }, [exitArmed]);
+
+  function requestExit() {
+    if (exitArmed) exit();
+    else setExitArmed(true);
+  }
+
   useInput(
     (input, key) => {
-      if (key.ctrl && input === 'c') exit();
+      const inputOwnsCtrlC = connectionState.status === 'connected' && active.type === 'idle';
+      if (key.ctrl && input === 'c' && !inputOwnsCtrlC) exit();
       if (key.ctrl && input === 'z') {
         const ttyStdin = process.stdin as { setRawMode?: (mode: boolean) => void };
         ttyStdin.setRawMode?.(false);
@@ -129,7 +122,7 @@ export function App({ connectionState, aiUrl, aiModel, aiKey, onChangeDatabase }
   async function handleQuery(sql: string) {
     if (connectionState.status !== 'connected') return;
     setLastSqlQuery(sql);
-    setActive({ type: 'loading', label: 'Query', query: sql });
+    setActive({ type: 'loading', label: 'Running query', query: sql });
     const updated = addToHistory(history, sql);
     setHistory(updated);
     saveHistory(updated);
@@ -141,17 +134,19 @@ export function App({ connectionState, aiUrl, aiModel, aiKey, onChangeDatabase }
     setActive({ type: 'idle' });
   }
 
-  async function handleErd() {
+  async function handleErd(table?: string) {
     if (connectionState.status !== 'connected') {
       writeEntry({ query: '/erd', commandMessage: { ok: false, text: 'Not connected.' }, queryState: { status: 'idle' }, elapsed: null, page: 0, aiResponse: '', aiError: null, shellOutput: null, erdData: null });
       return;
     }
-    setActive({ type: 'loading', label: 'Command', query: '/erd' });
+    setActive({ type: 'loading', label: 'Drawing diagram', query: table ? `/erd ${table}` : '/erd' });
     try {
-      const data = await fetchErd(connectionState.client, connectionState.driver);
-      writeEntry({ query: '/erd', commandMessage: null, queryState: { status: 'idle' }, elapsed: null, page: 0, aiResponse: '', aiError: null, shellOutput: null, erdData: data });
+      const all = await fetchErd(connectionState.client, connectionState.driver);
+      const data = table ? focusErd(all, table) : all;
+      if (!data) throw new Error(`No table named "${table}". Run /erd to see all tables.`);
+      writeEntry({ query: table ? `/erd ${table}` : '/erd', commandMessage: null, queryState: { status: 'idle' }, elapsed: null, page: 0, aiResponse: '', aiError: null, shellOutput: null, erdData: data });
     } catch (err) {
-      writeEntry({ query: '/erd', commandMessage: { ok: false, text: err instanceof Error ? err.message : String(err) }, queryState: { status: 'idle' }, elapsed: null, page: 0, aiResponse: '', aiError: null, shellOutput: null, erdData: null });
+      writeEntry({ query: table ? `/erd ${table}` : '/erd', commandMessage: { ok: false, text: err instanceof Error ? err.message : String(err) }, queryState: { status: 'idle' }, elapsed: null, page: 0, aiResponse: '', aiError: null, shellOutput: null, erdData: null });
     }
     setActive({ type: 'idle' });
   }
@@ -168,7 +163,7 @@ export function App({ connectionState, aiUrl, aiModel, aiKey, onChangeDatabase }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     }
-    writeEntry({ query: '/explain', commandMessage: null, queryState: { status: 'idle' }, elapsed: null, page: 0, aiResponse: fullText, aiError: error, shellOutput: null, erdData: null });
+    writeEntry({ query: '/explain', echo: `/explain ${query}`, commandMessage: null, queryState: { status: 'idle' }, elapsed: null, page: 0, aiResponse: fullText, aiError: error, shellOutput: null, erdData: null });
     setActive({ type: 'idle' });
   }
 
@@ -203,7 +198,7 @@ export function App({ connectionState, aiUrl, aiModel, aiKey, onChangeDatabase }
 
   async function handleShell(cmd: string) {
     const q = `!${cmd}`;
-    setActive({ type: 'loading', label: 'Shell', query: q });
+    setActive({ type: 'loading', label: 'Running', query: q });
     const result = await runShell(cmd);
     const combined = [result.stdout, result.stderr].filter(Boolean).join('\n');
     writeEntry({ query: q, commandMessage: null, queryState: { status: 'idle' }, elapsed: null, page: 0, aiResponse: '', aiError: null, shellOutput: combined || '(no output)', erdData: null });
@@ -242,7 +237,7 @@ export function App({ connectionState, aiUrl, aiModel, aiKey, onChangeDatabase }
         onQuery: (query) => { void handleQuery(query); },
         onChangeDatabase: (db) => { onChangeDatabase?.(db); },
         onExport: handleExport,
-        onErd: () => { void handleErd(); },
+        onErd: (table) => { void handleErd(table); },
         onClear: () => {
           setCompletedEntries([]);
           setHasHistory(false);
@@ -269,6 +264,7 @@ export function App({ connectionState, aiUrl, aiModel, aiKey, onChangeDatabase }
 
   const isLoading = active.type !== 'idle';
   const isConnected = connectionState.status === 'connected';
+  const status = isConnected ? [connectionState.user, connectionState.database].filter(Boolean).join('@') : undefined;
 
   return (
     <Box flexDirection="column">
@@ -279,58 +275,49 @@ export function App({ connectionState, aiUrl, aiModel, aiKey, onChangeDatabase }
           </Box>
         )}
       </Static>
-      <Box flexDirection="column" paddingX={1}>
-        {!hasHistory && active.type === 'idle' && (
+
+      {!hasHistory && active.type === 'idle' && (
+        <Box paddingX={1}>
           <Banner connectionState={connectionState} />
-        )}
+        </Box>
+      )}
 
-        {/* Loading indicator — replaces the large active-result block */}
-        {active.type === 'loading' && (
-          <Box flexDirection="column" marginBottom={1}>
-            <QueryHeader label={active.label} query={active.query} />
-            <Text dimColor> running…</Text>
-          </Box>
-        )}
+      {active.type === 'loading' && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text>{fmtPromptEcho(active.query)}</Text>
+          <Spinner label={active.label} />
+        </Box>
+      )}
 
-        {/* Streaming AI — grows while streaming, committed to Static on done */}
-        {active.type === 'streaming' && (
-          <Box flexDirection="column" marginBottom={1}>
-            <QueryHeader label="Query" query={active.query} />
-            <Box flexDirection="column" marginTop={1}>
-              <Text color={theme.accent} bold>Explanation:</Text>
-              <Box marginTop={1}>
-                {active.error
-                  ? <ErrorBox message={active.error} />
-                  : <Text color={PLACEHOLDER}>{active.text}<Text color={PLACEHOLDER}>▋</Text></Text>
-                }
-              </Box>
-            </Box>
-          </Box>
-        )}
+      {active.type === 'streaming' && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text>{fmtPromptEcho(`/explain ${active.query}`)}</Text>
+          {active.error ? (
+            <Text>{fmtBody(fmtError(active.error))}</Text>
+          ) : active.text ? (
+            <Text>{fmtBody(active.text + '▋')}</Text>
+          ) : (
+            <Spinner label="Explaining" />
+          )}
+        </Box>
+      )}
 
-        {isConnected ? (
-          <QueryInput
-            onSubmit={handleSubmit}
-            isLoading={isLoading}
-            onModeChange={setVimMode}
-            onShellModeChange={setInputIsShell}
-            vimEnabled={vimEnabled}
-            history={history}
-            aliases={aliases}
-            schema={schema ?? undefined}
-          />
-        ) : (
-          <Text dimColor>Not connected. Press Ctrl+C to exit.</Text>
-        )}
-
-        {(vimEnabled || inputIsShell) && (
-          <Box marginTop={1}>
-            <Text bold color={inputIsShell ? theme.shellMode : (vimMode === 'NORMAL' ? theme.normalMode : theme.insertMode)}>
-              {isRawModeSupported ? (inputIsShell ? '[SHELL]' : `[${vimMode}]`) : ''}
-            </Text>
-          </Box>
-        )}
-      </Box>
+      {isConnected ? (
+        <QueryInput
+          onSubmit={handleSubmit}
+          isLoading={isLoading}
+          onExitRequest={requestExit}
+          vimEnabled={vimEnabled}
+          history={history}
+          aliases={aliases}
+          schema={schema ?? undefined}
+          status={status}
+          notice={exitArmed ? 'Press Ctrl-C again to exit' : null}
+          vimRemaps={settings.vimInsertModeRemaps}
+        />
+      ) : (
+        <Text dimColor>Not connected. Press Ctrl+C to exit.</Text>
+      )}
     </Box>
   );
 }

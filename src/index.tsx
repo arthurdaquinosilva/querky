@@ -75,7 +75,10 @@ function Root({ initialDsn, aiUrl, aiModel, aiKey }: RootProps) {
   );
 }
 
-render(
+const app = render(
   <Root initialDsn={initialDsn} aiUrl={aiUrl} aiModel={aiModel} aiKey={aiKey} />,
-  { exitOnCtrlC: true },
+  { exitOnCtrlC: false },
 );
+
+// An open DB connection would otherwise keep the process alive after the UI unmounts.
+void app.waitUntilExit().then(() => process.exit(0));

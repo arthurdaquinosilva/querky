@@ -8,4 +8,13 @@ export const theme = {
   error: '#af5f5f',
   warning: '#d7af87',
   muted: '#9e9e9e',
+  subtle: '#585858',
+  border: '#767676',
+  sql: {
+    keyword: '#af87af',
+    string: '#5faf5f',
+    number: '#d7af87',
+    comment: '#767676',
+  },
+  tables: ['#d75f87', '#5faf5f', '#87afaf', '#af87af', '#af875f', '#d7af87', '#5f87af', '#5f8787'],
 } as const;

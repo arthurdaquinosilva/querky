@@ -1,321 +1,247 @@
-import { useState, useEffect, useRef } from 'react';
+import { useRef, useState } from 'react';
 import { spawnSync } from 'node:child_process';
 import { writeFileSync, readFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { useInput, useStdin } from 'ink';
+import { useInput, useStdin, type Key } from 'ink';
+import { createVimState, setVimText, vimKey, visualRange, type VimMode, type VimState } from '../vim.js';
+import { searchHistory } from '../historySearch.js';
 
-export type VimMode = 'INSERT' | 'NORMAL';
+export type { VimMode } from '../vim.js';
 
-interface State {
-  value: string;
-  cursor: number;
-  mode: VimMode;
-  pending: string;
-  yank: string;
-  historyIndex: number;  // -1 = not browsing history
-  draft: string;         // saved input before history navigation started
+interface PromptState {
+  vim: VimState;
+  shell: boolean;
+  historyIndex: number; // -1 = not browsing history
+  draft: string; // input saved when history browsing started
   suggestionIndex: number; // -1 = none selected
-  pendingSubmit: string | null; // set by Enter key, consumed by useEffect
-  pendingEditor: string | null; // value to edit; set to trigger editor, consumed by useEffect
+  showHelp: boolean;
+  search: HistorySearch | null;
 }
 
-function wordForward(str: string, pos: number): number {
-  let i = pos;
-  while (i < str.length && !/\s/.test(str[i])) i++;
-  while (i < str.length && /\s/.test(str[i])) i++;
-  return i;
+interface HistorySearch {
+  query: string;
+  index: number; // position in the match list; Ctrl+R moves to older matches
+  original: string; // full input (with ! prefix), kept if no match is accepted
+  mode: VimMode; // mode to land in after accepting
+  fromSlash: boolean;
 }
 
-function wordEnd(str: string, pos: number): number {
-  let i = pos + 1;
-  while (i < str.length && /\s/.test(str[i])) i++;
-  while (i < str.length - 1 && !/\s/.test(str[i + 1])) i++;
-  return Math.min(i, Math.max(0, str.length - 1));
+export interface PromptInputOptions {
+  onSubmit: (value: string) => void;
+  isActive: boolean;
+  vimEnabled: boolean;
+  history: string[];
+  getSuggestions: (value: string, cursor: number) => string[];
+  acceptSuggestion: (value: string, cursor: number, suggestion: string) => { value: string; cursor: number };
+  /** Suggestions that are navigable with ↑/↓ before Tab is pressed (slash commands). */
+  eagerSuggestions: (value: string) => boolean;
+  onTab?: (value: string) => string | null;
+  onExitRequest: () => void;
+  vimRemaps?: Record<string, string>;
 }
 
-function wordBackward(str: string, pos: number): number {
-  let i = pos;
-  while (i > 0 && /\s/.test(str[i - 1])) i--;
-  while (i > 0 && !/\s/.test(str[i - 1])) i--;
-  return i;
+function openEditor(initial: string): string | null {
+  const editor = process.env.VISUAL ?? process.env.EDITOR ?? 'vi';
+  const tmpPath = join(tmpdir(), `querky-edit-${Date.now()}.sql`);
+  const ttyStdin = process.stdin as { setRawMode?: (mode: boolean) => void };
+  try {
+    writeFileSync(tmpPath, initial);
+    // spawnSync blocks the event loop so the editor owns the TTY; raw mode must be off meanwhile.
+    process.stdout.write('\x1B[?25h');
+    ttyStdin.setRawMode?.(false);
+    spawnSync(editor, [tmpPath], { stdio: 'inherit' });
+    process.stdout.write('\x1B[2J\x1B[H\x1B[?25l');
+    ttyStdin.setRawMode?.(true);
+    return readFileSync(tmpPath, 'utf8').trimEnd();
+  } catch {
+    ttyStdin.setRawMode?.(true);
+    return null;
+  } finally {
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      /* best-effort */
+    }
+  }
 }
 
-function deleteWordForward(str: string, pos: number): string {
-  const end = wordForward(str, pos);
-  return str.slice(0, pos) + str.slice(end);
+function withText(s: PromptState, raw: string, keepMode = true): PromptState {
+  const shell = raw.startsWith('!');
+  const text = shell ? raw.slice(1).trimStart() : raw;
+  const mode: VimMode = keepMode && s.vim.mode !== 'INSERT' ? 'NORMAL' : 'INSERT';
+  return { ...s, shell, vim: setVimText(s.vim, text, mode), suggestionIndex: -1 };
 }
 
-function deleteWordBackward(str: string, pos: number): { value: string; cursor: number } {
-  const start = wordBackward(str, pos);
-  return { value: str.slice(0, start) + str.slice(pos), cursor: start };
-}
-
-export function useVimInput(
-  onSubmit: (value: string) => void,
-  isActive: boolean,
-  vimEnabled: boolean = true,
-  onTab?: (value: string) => string | null,
-  history: string[] = [],
-  getSuggestions?: (value: string, cursor: number) => string[],
-  onSuggestionAccept?: (value: string, cursor: number, suggestion: string) => { value: string; cursor: number },
-) {
+export function useVimInput(opts: PromptInputOptions) {
   const { isRawModeSupported } = useStdin();
-  const [state, setState] = useState<State>({
-    value: '',
-    cursor: 0,
-    mode: 'INSERT',
-    pending: '',
-    yank: '',
+  const [state, setState] = useState<PromptState>(() => ({
+    vim: createVimState(),
+    shell: false,
     historyIndex: -1,
     draft: '',
     suggestionIndex: -1,
-    pendingSubmit: null,
-    pendingEditor: null,
-  });
+    showHelp: false,
+    search: null,
+  }));
 
-  // Always keep the ref pointing to the latest onSubmit so the effect
-  // doesn't need onSubmit as a dependency (avoids stale-closure issues).
-  const onSubmitRef = useRef(onSubmit);
-  onSubmitRef.current = onSubmit;
+  // Keys can arrive faster than React re-renders, so each one reduces from the
+  // latest state rather than the one captured by the last render.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const optsRef = useRef(opts);
+  optsRef.current = opts;
 
-  // Consume pendingSubmit after React has committed the state update.
-  // This is the correct pattern: the updater runs during the render phase
-  // (async from the event handler's perspective in React 18), so we cannot
-  // rely on the updater having run by the time the event handler returns.
-  useEffect(() => {
-    if (state.pendingSubmit !== null) {
-      onSubmitRef.current(state.pendingSubmit);
-      setState((s) => ({ ...s, pendingSubmit: null }));
+  const commit = (next: PromptState) => {
+    stateRef.current = next;
+    setState(next);
+  };
+
+  const handleKey = (input: string, key: Key) => {
+    const o = optsRef.current;
+    const s = stateRef.current;
+    const text = s.vim.text;
+    const full = (s.shell ? '!' : '') + text;
+
+    if (s.search) return handleSearchKey(s, s.search, input, key, o);
+
+    const inNormal = o.vimEnabled && s.vim.mode === 'NORMAL' && !s.vim.pending;
+    const startsSearch = (key.ctrl && input === 'r' && (!o.vimEnabled || s.vim.mode === 'INSERT')) || (inNormal && input === '/' && !key.ctrl && !key.meta);
+    if (startsSearch) {
+      const mode = o.vimEnabled ? s.vim.mode : 'INSERT';
+      commit({ ...s, showHelp: false, suggestionIndex: -1, search: { query: '', index: 0, original: full, mode, fromSlash: input === '/' } });
+      return;
     }
-  }, [state.pendingSubmit]);
 
-  // Open $EDITOR when pendingEditor is set. spawnSync blocks the event loop,
-  // giving the editor full terminal control. Raw mode is disabled before spawn
-  // and re-enabled after so the editor gets a normal TTY.
-  useEffect(() => {
-    if (state.pendingEditor === null) return;
-    const initialContent = state.pendingEditor;
-    const editor = process.env.EDITOR ?? process.env.VISUAL ?? 'vi';
-    const tmpPath = join(tmpdir(), `querky-edit-${Date.now()}.sql`);
-    const ttyStdin = process.stdin as { setRawMode?: (mode: boolean) => void };
-    try {
-      writeFileSync(tmpPath, initialContent);
-      process.stdout.write('\x1B[?25h'); // show cursor for editor
-      ttyStdin.setRawMode?.(false);
-      spawnSync(editor, [tmpPath], { stdio: 'inherit' });
-      // Clear visible screen so Ink redraws from a known position, then
-      // re-hide the cursor (App hides it on mount but the editor showed it).
-      process.stdout.write('\x1B[2J\x1B[H\x1B[?25l');
-      ttyStdin.setRawMode?.(true);
-      const content = readFileSync(tmpPath, 'utf8').trimEnd();
-      setState((s) => ({ ...s, pendingEditor: null, value: content, cursor: content.length, mode: 'INSERT' }));
-    } catch {
-      ttyStdin.setRawMode?.(true);
-      setState((s) => ({ ...s, pendingEditor: null }));
-    } finally {
-      try { unlinkSync(tmpPath); } catch { /* best-effort */ }
+    if (key.ctrl && input === 'c') {
+      if (text || s.shell) commit({ ...withText(s, '', false), historyIndex: -1, showHelp: false });
+      else o.onExitRequest();
+      return;
     }
-  }, [state.pendingEditor]);
+    if (key.ctrl && input === 'd' && !text && !s.shell) {
+      o.onExitRequest();
+      return;
+    }
 
-  useInput(
-    (input, key) => {
-      setState((s) => {
-        // ── INSERT mode ──────────────────────────────────────────────
-        if (s.mode === 'INSERT') {
-          if (key.escape) {
-            if (s.value.startsWith('!')) {
-              return { ...s, value: '', cursor: 0, pending: '' };
-            }
-            if (!vimEnabled) return s;
-            return { ...s, mode: 'NORMAL', cursor: Math.max(0, s.cursor - 1), pending: '' };
-          }
-          if (key.return) {
-            const sugs = getSuggestions?.(s.value, s.cursor) ?? [];
-            if (sugs.length > 0 && s.suggestionIndex >= 0) {
-              const sug = sugs[s.suggestionIndex];
-              if (onSuggestionAccept) {
-                const r = onSuggestionAccept(s.value, s.cursor, sug);
-                return { ...s, value: r.value, cursor: r.cursor, suggestionIndex: -1 };
-              }
-              const val = `/${sug}`;
-              return { ...s, value: val, cursor: val.length, suggestionIndex: -1 };
-            }
-            const trimmed = s.value.trim();
-            return { value: '', cursor: 0, mode: 'INSERT', pending: '', yank: s.yank, historyIndex: -1, draft: '', suggestionIndex: -1, pendingSubmit: trimmed || null };
-          }
-          if (key.upArrow) {
-            const sugs = getSuggestions?.(s.value, s.cursor) ?? [];
-            if (sugs.length > 0) {
-              const next = s.suggestionIndex <= 0 ? sugs.length - 1 : s.suggestionIndex - 1;
-              return { ...s, suggestionIndex: next };
-            }
-            if (history.length === 0) return s;
-            const draft = s.historyIndex === -1 ? s.value : s.draft;
-            const next = s.historyIndex === -1 ? history.length - 1 : Math.max(0, s.historyIndex - 1);
-            const val = history[next] ?? '';
-            return { ...s, value: val, cursor: val.length, historyIndex: next, draft };
-          }
-          if (key.downArrow) {
-            const sugs = getSuggestions?.(s.value, s.cursor) ?? [];
-            if (sugs.length > 0) {
-              const next = s.suggestionIndex >= sugs.length - 1 ? 0 : s.suggestionIndex + 1;
-              return { ...s, suggestionIndex: next };
-            }
-            if (s.historyIndex === -1) return s;
-            if (s.historyIndex === history.length - 1) {
-              return { ...s, value: s.draft, cursor: s.draft.length, historyIndex: -1, draft: '' };
-            }
-            const next = s.historyIndex + 1;
-            const val = history[next] ?? '';
-            return { ...s, value: val, cursor: val.length, historyIndex: next };
-          }
-          if (key.backspace || key.delete) {
-            if (s.cursor === 0) return s;
-            return {
-              ...s,
-              value: s.value.slice(0, s.cursor - 1) + s.value.slice(s.cursor),
-              cursor: s.cursor - 1,
-              historyIndex: -1,
-            };
-          }
-          if (key.leftArrow) return { ...s, cursor: Math.max(0, s.cursor - 1) };
-          if (key.rightArrow) return { ...s, cursor: Math.min(s.value.length, s.cursor + 1) };
-          if (key.tab && !key.shift) {
-            const sugs = getSuggestions?.(s.value, s.cursor) ?? [];
-            if (sugs.length > 0) {
-              const next = s.suggestionIndex < sugs.length - 1 ? s.suggestionIndex + 1 : 0;
-              return { ...s, suggestionIndex: next };
-            }
-            const completed = onTab?.(s.value);
-            if (completed != null) return { ...s, value: completed, cursor: completed.length };
-            return s;
-          }
-          if (key.tab && key.shift) {
-            const sugs = getSuggestions?.(s.value, s.cursor) ?? [];
-            if (sugs.length > 0) {
-              const next = s.suggestionIndex <= 0 ? sugs.length - 1 : s.suggestionIndex - 1;
-              return { ...s, suggestionIndex: next };
-            }
-            return s;
-          }
-          if (key.ctrl && input === 'e') {
-            return { ...s, pendingEditor: s.value };
-          }
-          if (!key.ctrl && !key.meta && input) {
-            const chars = input === '!' && s.value === '' ? '! ' : input;
-            return {
-              ...s,
-              value: s.value.slice(0, s.cursor) + chars + s.value.slice(s.cursor),
-              cursor: s.cursor + chars.length,
-              historyIndex: -1,
-              suggestionIndex: -1,
-            };
-          }
-          return s;
-        }
+    const inInsert = !o.vimEnabled || s.vim.mode === 'INSERT';
+    if (inInsert && !text && !s.shell && input === '?' && !key.ctrl && !key.meta) {
+      commit({ ...s, showHelp: !s.showHelp });
+      return;
+    }
+    const base = s.showHelp ? { ...s, showHelp: false } : s;
+    if (inInsert && !text && !s.shell && input === '!' && !key.ctrl && !key.meta) {
+      commit({ ...base, shell: true });
+      return;
+    }
+    if (s.shell && !text && (key.backspace || key.delete || key.escape)) {
+      commit({ ...base, shell: false });
+      return;
+    }
 
-        // ── NORMAL mode ──────────────────────────────────────────────
-        if (key.return) {
-          const trimmed = s.value.trim();
-          return { value: '', cursor: 0, mode: 'INSERT', pending: '', yank: s.yank, historyIndex: -1, draft: '', suggestionIndex: -1, pendingSubmit: trimmed || null };
-        }
+    if (inInsert && !s.shell) {
+      const sugs = o.getSuggestions(full, s.vim.cursor);
+      const selecting = s.suggestionIndex >= 0;
+      const navigable = sugs.length > 0 && (selecting || o.eagerSuggestions(full));
+      const step = (d: number) => commit({ ...base, suggestionIndex: (s.suggestionIndex + d + sugs.length) % sugs.length });
+      if (sugs.length > 0 && key.tab) return step(key.shift ? -1 : 1);
+      if (navigable && key.downArrow) return step(1);
+      if (navigable && key.upArrow) return step(selecting ? -1 : sugs.length);
+      if (selecting && key.escape) return commit({ ...base, suggestionIndex: -1 });
+      if (selecting && (key.return || key.rightArrow)) {
+        const r = o.acceptSuggestion(full, s.vim.cursor, sugs[s.suggestionIndex] ?? '');
+        return commit({ ...base, vim: { ...setVimText(s.vim, r.value, 'INSERT'), cursor: r.cursor }, suggestionIndex: -1 });
+      }
+      if (key.tab) {
+        const completed = o.onTab?.(full);
+        if (completed != null) commit({ ...base, vim: setVimText(s.vim, completed, 'INSERT') });
+        return;
+      }
+    }
 
-        // Pending operator: d
-        if (s.pending === 'd') {
-          if (input === 'd') {
-            return { ...s, value: '', cursor: 0, pending: '' };
-          }
-          if (input === 'w') {
-            const val = deleteWordForward(s.value, s.cursor);
-            return { ...s, value: val, cursor: Math.min(s.cursor, Math.max(0, val.length - 1)), pending: '' };
-          }
-          if (input === 'b') {
-            const { value, cursor } = deleteWordBackward(s.value, s.cursor);
-            return { ...s, value, cursor: Math.min(cursor, Math.max(0, value.length - 1)), pending: '' };
-          }
-          return { ...s, pending: '' };
-        }
+    const { state: vim, action } = vimKey(base.vim, { ...key, input }, o.vimEnabled, { remaps: o.vimRemaps });
+    let next: PromptState = { ...base, vim };
+    if (vim.text !== text) next = { ...next, suggestionIndex: -1, historyIndex: -1 };
 
-        // Pending operator: c (change = delete + INSERT)
-        if (s.pending === 'c') {
-          if (input === 'c') {
-            return { ...s, value: '', cursor: 0, mode: 'INSERT', pending: '' };
-          }
-          if (input === 'w') {
-            const val = deleteWordForward(s.value, s.cursor);
-            return { ...s, value: val, cursor: s.cursor, mode: 'INSERT', pending: '' };
-          }
-          if (input === 'b') {
-            const { value, cursor } = deleteWordBackward(s.value, s.cursor);
-            return { ...s, value, cursor, mode: 'INSERT', pending: '' };
-          }
-          return { ...s, pending: '' };
-        }
+    if (action === 'submit') {
+      const value = full.trim();
+      commit({ ...withText(next, '', false), historyIndex: -1, draft: '' });
+      if (value && value !== '!') o.onSubmit(value);
+      return;
+    }
+    if (action === 'history-prev' || action === 'history-next') {
+      const h = o.history;
+      if (action === 'history-prev') {
+        if (h.length === 0) return commit(next);
+        const idx = s.historyIndex === -1 ? h.length - 1 : Math.max(0, s.historyIndex - 1);
+        const draft = s.historyIndex === -1 ? full : s.draft;
+        return commit({ ...withText(next, h[idx] ?? ''), historyIndex: idx, draft });
+      }
+      if (s.historyIndex === -1) return commit(next);
+      if (s.historyIndex >= h.length - 1) return commit({ ...withText(next, s.draft), historyIndex: -1, draft: '' });
+      const idx = s.historyIndex + 1;
+      return commit({ ...withText(next, h[idx] ?? ''), historyIndex: idx });
+    }
+    if (action === 'open-editor') {
+      const edited = openEditor(full);
+      if (edited !== null) return commit({ ...withText(next, edited, false), historyIndex: -1 });
+    }
+    commit(next);
+  };
 
-        // Pending operator: y (yank)
-        if (s.pending === 'y') {
-          if (input === 'y') {
-            return { ...s, yank: s.value, pending: '' };
-          }
-          return { ...s, pending: '' };
-        }
+  function handleSearchKey(s: PromptState, search: HistorySearch, input: string, key: Key, o: PromptInputOptions) {
+    const matches = searchHistory(o.history, search.query);
+    const current = matches[Math.min(search.index, matches.length - 1)];
+    const accept = (): PromptState => {
+      const chosen = current ?? search.original;
+      const next = { ...s, search: null, historyIndex: -1 };
+      const withChosen = withText(next, chosen, false);
+      return search.mode === 'INSERT' ? withChosen : { ...withChosen, vim: setVimText(withChosen.vim, withChosen.vim.text, 'NORMAL') };
+    };
 
-        const maxCursor = Math.max(0, s.value.length - 1);
+    // The buffer is untouched while searching, so cancelling just drops the search.
+    if (key.ctrl && input === 'c') return commit({ ...s, search: null });
+    if (key.ctrl && input === 'r') return commit({ ...s, search: { ...search, index: Math.min(search.index + 1, Math.max(0, matches.length - 1)) } });
+    if (key.backspace || key.delete) {
+      if (!search.query) return commit({ ...s, search: null });
+      return commit({ ...s, search: { ...search, query: search.query.slice(0, -1), index: 0 } });
+    }
+    if (key.escape || key.tab) return commit(accept());
+    if (key.return) {
+      const accepted = accept();
+      const value = ((accepted.shell ? '!' : '') + accepted.vim.text).trim();
+      commit({ ...withText(accepted, '', false), historyIndex: -1, draft: '' });
+      if (value && value !== '!') o.onSubmit(value);
+      return;
+    }
+    if (input && !key.ctrl && !key.meta) {
+      return commit({ ...s, search: { ...search, query: search.query + input.replace(/[\r\n]+/g, ' '), index: 0 } });
+    }
+  }
 
-        switch (input) {
-          case 'i': return { ...s, mode: 'INSERT', pending: '' };
-          case 'a': return { ...s, mode: 'INSERT', cursor: Math.min(s.value.length, s.cursor + 1), pending: '' };
-          case 'A': return { ...s, mode: 'INSERT', cursor: s.value.length, pending: '' };
-          case 'I': return { ...s, mode: 'INSERT', cursor: 0, pending: '' };
-          case 'h': return { ...s, cursor: Math.max(0, s.cursor - 1) };
-          case 'l': return { ...s, cursor: Math.min(maxCursor, s.cursor + 1) };
-          case 'w': return { ...s, cursor: Math.min(maxCursor, wordForward(s.value, s.cursor)) };
-          case 'b': return { ...s, cursor: wordBackward(s.value, s.cursor) };
-          case 'e': return { ...s, pendingEditor: s.value };
-          case '0': return { ...s, cursor: 0 };
-          case '$': return { ...s, cursor: maxCursor };
-          case 'x': {
-            if (s.cursor >= s.value.length) return s;
-            const val = s.value.slice(0, s.cursor) + s.value.slice(s.cursor + 1);
-            return { ...s, value: val, cursor: Math.min(s.cursor, Math.max(0, val.length - 1)) };
-          }
-          case 's': {
-            // substitute char: delete under cursor + INSERT
-            if (s.cursor >= s.value.length) return { ...s, mode: 'INSERT' };
-            const val = s.value.slice(0, s.cursor) + s.value.slice(s.cursor + 1);
-            return { ...s, value: val, cursor: s.cursor, mode: 'INSERT' };
-          }
-          case 'S': {
-            // substitute line: clear + INSERT
-            return { ...s, value: '', cursor: 0, mode: 'INSERT' };
-          }
-          case 'C': {
-            // change to end of line
-            const val = s.value.slice(0, s.cursor);
-            return { ...s, value: val, cursor: Math.min(s.cursor, Math.max(0, val.length - 1)), mode: 'INSERT' };
-          }
-          case 'D': {
-            // delete to end of line
-            const val = s.value.slice(0, s.cursor);
-            return { ...s, value: val, cursor: Math.min(s.cursor, Math.max(0, val.length - 1)) };
-          }
-          case 'p': {
-            // paste yanked text after cursor
-            if (!s.yank) return s;
-            const insertAt = Math.min(s.cursor + 1, s.value.length);
-            const val = s.value.slice(0, insertAt) + s.yank + s.value.slice(insertAt);
-            return { ...s, value: val, cursor: Math.max(0, insertAt + s.yank.length - 1) };
-          }
-          case 'd': return { ...s, pending: 'd' };
-          case 'c': return { ...s, pending: 'c' };
-          case 'y': return { ...s, pending: 'y' };
-          default: return s;
-        }
-      });
-    },
-    { isActive: isActive && (isRawModeSupported ?? false) },
-  );
+  useInput(handleKey, { isActive: opts.isActive && (isRawModeSupported ?? false) });
 
-  return { value: state.value, cursor: state.cursor, mode: vimEnabled ? state.mode : 'INSERT', suggestionIndex: state.suggestionIndex };
+  const mode: VimMode = opts.vimEnabled ? state.vim.mode : 'INSERT';
+  return {
+    text: state.vim.text,
+    cursor: state.vim.cursor,
+    mode,
+    pending: state.vim.pending,
+    shell: state.shell,
+    suggestionIndex: state.suggestionIndex,
+    showHelp: state.showHelp,
+    selection: opts.vimEnabled ? visualRange(state.vim) : null,
+    search: state.search
+      ? (() => {
+          const matches = searchHistory(opts.history, state.search.query);
+          const index = Math.min(state.search.index, Math.max(0, matches.length - 1));
+          return {
+            query: state.search.query,
+            match: matches[index] ?? null,
+            index,
+            total: matches.length,
+            fromSlash: state.search.fromSlash,
+          };
+        })()
+      : null,
+  };
 }

@@ -7,8 +7,9 @@ A quirky terminal SQL client with vim keybindings, schema-aware autocomplete, qu
 ## Features
 
 - **Beautiful tables** — clean, aligned output with automatic expanded mode for wide results
-- **Vim mode** — full normal/insert mode with motions, operators, yank/paste
-- **Query history** — persisted across sessions, navigate with ↑↓
+- **Vim mode** — modelled on Claude Code's: counts, motions, operators with text objects, visual mode, undo and `.` repeat
+- **Query history** — persisted across sessions, navigate with ↑↓, search with Ctrl+R
+- **ER diagrams** — `/erd` draws your schema with crow's-foot relationship lines, right in the terminal
 - **AI explanation** — explain any SQL query in plain English via Groq or Ollama
 - **Slash commands** — with Tab autocomplete and ↑↓ suggestion navigation
 - **Responsive layout** — auto-switches to vertical key=value mode when the table is wider than the terminal
@@ -122,6 +123,7 @@ Ollama is the default endpoint (`http://localhost:11434/v1`).
 | `/databases` | List available databases |
 | `/tables` | List tables in the current database |
 | `/describe <table>` | Show columns, types, and key constraints for a table |
+| `/erd [table]` | Draw an entity-relationship diagram (only `table` and its neighbours when given) |
 | `/export csv` | Export last result to a CSV file |
 | `/export json` | Export last result to a JSON file |
 | `/next` | Next page of results |
@@ -197,24 +199,30 @@ Users coming from `psql` can use familiar meta-commands:
 
 ## Vim Mode
 
-Querky starts in INSERT mode. Press `Escape` to enter NORMAL mode.
+Querky starts in INSERT mode; the footer under the prompt shows `-- INSERT --`. Press `Escape` for NORMAL mode. The bindings follow Claude Code's vim mode.
 
 | Keys | Action |
 |---|---|
-| `i` / `a` / `A` | Enter INSERT mode |
-| `h` / `l` | Move left/right |
-| `w` / `b` / `e` | Word forward/backward/end |
-| `0` / `$` | Start/end of line |
-| `dd` / `cc` / `S` | Clear line |
-| `dw` / `cw` | Delete/change word |
-| `x` / `s` | Delete/substitute character |
-| `D` / `C` | Delete/change to end of line |
-| `yy` / `p` | Yank line / paste |
-| `e` | Open current input in `$EDITOR` |
+| `i` `a` `I` `A` `o` `O` | Enter INSERT mode |
+| `h` `j` `k` `l` · `w` `e` `b` · `0` `^` `$` · `gg` `G` | Move (with counts: `3w`, `2j`) |
+| `f` `F` `t` `T` + char · `;` `,` | Find a character on the line, repeat |
+| `d` `c` `y` + motion · `dd` `cc` `yy` · `D` `C` `Y` | Delete / change / yank |
+| `iw` `aw` `i"` `a'` `i(` `a[` `i{` … | Text objects (`diw`, `ci"`, `ya(`) |
+| `x` `X` `r` `s` `S` `~` `J` `>>` `<<` | Edit characters and lines |
+| `p` `P` | Paste after / before |
+| `v` `V` | Visual / visual line mode |
+| `u` · `Ctrl+R` · `.` | Undo · redo · repeat the last change |
+| `/` | Search history (like Ctrl+R) |
 
-In INSERT mode, **↑↓** navigates query history. **Ctrl+E** opens `$EDITOR` from INSERT mode.
+`j`/`k` (and ↑↓) move between lines and step through history at the first and last line. **Ctrl+R** searches history, **Ctrl+G** opens the input in `$EDITOR`, and `\` + Enter, Shift+Enter or Option+Enter add a new line. Press `?` on an empty prompt to see the shortcuts.
 
-Disable vim mode with `/toggle-vim-mode` or pass `--no-vim` for plain input.
+To leave INSERT mode with `jj` (or another two-key sequence), add to `~/.config/querky/settings.json`:
+
+```json
+{ "vimInsertModeRemaps": { "jj": "<Esc>" } }
+```
+
+Disable vim mode with `/toggle-vim-mode`.
 
 ---
 

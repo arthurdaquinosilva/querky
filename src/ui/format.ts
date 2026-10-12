@@ -5,6 +5,8 @@ import type { QueryState } from '../db/query.js';
 import type { ErdData } from '../db/erd.js';
 import type { HelpData } from '../commands/router.js';
 import { theme } from './theme.js';
+import { tokenizeSql } from './sqlHighlight.js';
+import { buildErdDiagram, type ErdSpan } from './erdDiagram.js';
 
 // ── ANSI helpers ─────────────────────────────────────────────────────────────
 
@@ -24,53 +26,46 @@ function bold(s: string): string { return BOLD + s + R; }
 function dim(s: string): string { return DIM + s + R; }
 function cbold(hex: string, s: string): string { return fg(hex) + BOLD + s + R; }
 function cdim(hex: string, s: string): string { return fg(hex) + DIM + s + R; }
+const ITALIC = '\x1B[3m';
 
 const ACCENT     = theme.accent;
-const HEADER_COL = theme.muted;
 const NULL_COL   = theme.muted;
 const INDIGO     = theme.accent;
-const AI_COL     = theme.insertMode;
 const ERROR_COL  = theme.error;
 const WARN_COL   = theme.warning;
-const SHELL_COL  = theme.shellMode;
-const ERD_BORDER = '#767676';
-
-const ERD_PALETTE = [
-  '#d75f87',
-  '#5faf5f',
-  '#87afaf',
-  '#af87af',
-  '#af875f',
-  '#d7af87',
-  '#5f87af',
-  '#5f8787',
-];
+const MUTED      = theme.muted;
 
 const NULL_MARKER = '∅';
 const COL_PAD = 1;
 const SP = ' '.repeat(COL_PAD);
 
-// ── Query header ──────────────────────────────────────────────────────────────
+// ── Prompt echo ───────────────────────────────────────────────────────────────
 
-export function fmtHeader(label: string, query: string): string {
-  const dot = cbold(ACCENT, '● ');
-  if (query.includes('\n')) {
-    const lines = query.split('\n').map((l) => cbold(HEADER_COL, '  ' + l));
-    return dot + cbold(HEADER_COL, label + ':') + '\n' + lines.join('\n');
-  }
-  return dot + cbold(HEADER_COL, `${label}(${query})`);
+const SQL_COLORS: Record<string, string | undefined> = theme.sql;
+
+function highlightSql(line: string): string {
+  return tokenizeSql(line)
+    .map((t) => (SQL_COLORS[t.type] ? c(SQL_COLORS[t.type]!, t.text) : t.text))
+    .join('');
+}
+
+/** The submitted input, echoed like Claude Code's transcript: `> text`. */
+export function fmtPromptEcho(input: string): string {
+  const isSql = !input.startsWith('/') && !input.startsWith('\\') && !input.startsWith('!');
+  return input
+    .split('\n')
+    .map((line, i) => (i === 0 ? c(MUTED, '> ') : '  ') + (isSql ? highlightSql(line) : bold(line)))
+    .join('\n');
 }
 
 // ── Error / success ───────────────────────────────────────────────────────────
 
 export function fmtError(message: string): string {
-  return message.split('\n').map((line, i) =>
-    cbold(ERROR_COL, (i === 0 ? '✗  ' : '   ') + line)
-  ).join('\n');
+  return message.split('\n').map((line) => c(ERROR_COL, line)).join('\n');
 }
 
 export function fmtOk(text: string): string {
-  return c(ACCENT, '✓ ') + text;
+  return text;
 }
 
 // ── Table ─────────────────────────────────────────────────────────────────────
@@ -97,15 +92,17 @@ function hline(widths: number[], l: string, m: string, r: string): string {
 
 function fmtTable(columns: string[], rows: Record<string, unknown>[]): string {
   const widths = colWidths(columns, rows);
-  const top = hline(widths, '╭', '┬', '╮');
-  const mid = hline(widths, '├', '┼', '┤');
-  const bot = hline(widths, '╰', '┴', '╯');
+  const bdr = (x: string) => c(theme.border, x);
+  const top = bdr(hline(widths, '╭', '┬', '╮'));
+  const mid = bdr(hline(widths, '├', '┼', '┤'));
+  const bot = bdr(hline(widths, '╰', '┴', '╯'));
+  const sep = bdr('│');
 
   function headerRow(): string {
     const cells = columns.map((col, i) =>
       cbold(INDIGO, SP + col.slice(0, widths[i]).padEnd(widths[i]) + SP)
     );
-    return '│' + cells.join('│') + '│';
+    return sep + cells.join(sep) + sep;
   }
 
   function dataRow(row: Record<string, unknown>): string {
@@ -114,16 +111,10 @@ function fmtTable(columns: string[], rows: Record<string, unknown>[]): string {
       const cell = SP + v.slice(0, widths[i]).padEnd(widths[i]) + SP;
       return isNull(row[col]) ? cdim(NULL_COL, cell) : cell;
     });
-    return '│' + cells.join('│') + '│';
+    return sep + cells.join(sep) + sep;
   }
 
-  const out: string[] = [top, headerRow(), mid];
-  rows.forEach((row, i) => {
-    out.push(dataRow(row));
-    if (i < rows.length - 1) out.push(mid);
-  });
-  out.push(bot);
-  return out.join('\n');
+  return [top, headerRow(), mid, ...rows.map(dataRow), bot].join('\n');
 }
 
 function fmtExpanded(columns: string[], rows: Record<string, unknown>[]): string {
@@ -162,7 +153,7 @@ export function fmtQueryResult(
   const timing = elapsed !== null ? ` · ${fmtDuration(elapsed)}` : '';
 
   if (state.status === 'error') {
-    const t = elapsed !== null ? '\n' + cdim(ACCENT, fmtDuration(elapsed)) : '';
+    const t = elapsed !== null ? '\n' + c(MUTED, fmtDuration(elapsed)) : '';
     return fmtError(state.message) + t;
   }
 
@@ -170,7 +161,7 @@ export function fmtQueryResult(
   const { fields, rows } = result;
 
   if (rows.length === 0) {
-    return c(ACCENT, `No rows returned (${result.rowCount ?? 0} affected)${timing}`);
+    return c(MUTED, `No rows returned (${result.rowCount ?? 0} affected)${timing}`);
   }
 
   const totalRows = rows.length;
@@ -180,7 +171,7 @@ export function fmtQueryResult(
   const displayRows = rows.slice(start, start + pageSize);
   const isPaged = totalRows > pageSize;
 
-  const termWidth = process.stdout.columns ?? 80;
+  const termWidth = (process.stdout.columns ?? 80) - BODY_INDENT.length;
   const widths = colWidths(fields, displayRows);
   const tableWidth = 1 + widths.reduce((sum, w) => sum + w + 3, 0);
   const expanded = tableWidth > termWidth;
@@ -192,7 +183,7 @@ export function fmtQueryResult(
     const nav = (currentPage > 0 ? '  /prev' : '') + (currentPage < totalPages - 1 ? '  /next' : '');
     lines.push(c(WARN_COL, `Page ${currentPage + 1} of ${totalPages} · rows ${start + 1}–${start + displayRows.length} of ${totalRows}${nav}`));
   }
-  lines.push(c(ACCENT, `${displayRows.length} row${displayRows.length !== 1 ? 's' : ''}${timing}${expanded ? '  [expanded]' : ''}`));
+  lines.push(c(MUTED, `${displayRows.length} row${displayRows.length !== 1 ? 's' : ''}${timing}${expanded ? ' · expanded' : ''}`));
   return lines.join('\n');
 }
 
@@ -239,86 +230,44 @@ export function fmtHelp(data: HelpData): string {
 
 // ── ERD ───────────────────────────────────────────────────────────────────────
 
-export function fmtErd(data: ErdData): string {
+function spanToAnsi(span: ErdSpan): string {
+  if (span.text.trim() === '') return span.text;
+  const codes = (span.color ? fg(span.color) : '') + (span.bold ? BOLD : '') + (span.dim ? DIM : '') + (span.italic ? ITALIC : '');
+  return codes ? codes + span.text + R : span.text;
+}
+
+export function fmtErd(data: ErdData, width: number): string {
   if (data.tables.length === 0) return dim('No tables found in the current schema.');
 
-  const FK_PREFIX = 'FK → ';
-  const PAD = 1;
-
-  const colorMap = new Map(
-    data.tables.map((t, i) => [t.name, ERD_PALETTE[i % ERD_PALETTE.length]])
-  );
-
-  interface Metrics { nameW: number; typeW: number; keyW: number; totalW: number }
-
-  function metrics(t: typeof data.tables[0]): Metrics {
-    const nameW = Math.max(2, ...t.columns.map((c) => c.name.length));
-    const typeW = Math.max(4, ...t.columns.map((c) => c.type.length));
-    const keyW = Math.max(2, ...t.columns.map((c) =>
-      c.isPk ? 2 : c.fkTable ? FK_PREFIX.length + c.fkTable.length : 0
-    ));
-    const totalW = 4 + 3 * PAD * 2 + nameW + typeW + keyW;
-    return { nameW, typeW, keyW, totalW };
-  }
-
-  const allMetrics = data.tables.map(metrics);
-
-  function renderTable(t: typeof data.tables[0], m: Metrics, color: string): string[] {
-    const { nameW, typeW, keyW, totalW } = m;
-    const sp = ' '.repeat(PAD);
-    const p = (s: string, w: number) => s.slice(0, w).padEnd(w);
-    const bdr = (s: string) => c(ERD_BORDER, s);
-    const tc = (s: string) => cbold(color, s);
-
-    const top = bdr('╭' + '─'.repeat(totalW - 2) + '╮');
-    const headerW = totalW - 4;
-    const headerLine = bdr('│') + tc(sp + p(t.name, headerW) + sp) + bdr('│');
-    const sep = bdr('├' + '─'.repeat(nameW + PAD * 2) + '┬' + '─'.repeat(typeW + PAD * 2) + '┬' + '─'.repeat(keyW + PAD * 2) + '┤');
-    const bot = bdr('╰' + '─'.repeat(nameW + PAD * 2) + '┴' + '─'.repeat(typeW + PAD * 2) + '┴' + '─'.repeat(keyW + PAD * 2) + '╯');
-
-    const out = [top, headerLine, sep];
-    for (const col of t.columns) {
-      let keyPart: string;
-      if (col.isPk) {
-        keyPart = sp + bold(p('PK', keyW)) + sp;
-      } else if (col.fkTable) {
-        const fkColor = colorMap.get(col.fkTable) ?? color;
-        keyPart = sp + dim(FK_PREFIX) + c(fkColor, p(col.fkTable, keyW - FK_PREFIX.length)) + sp;
-      } else {
-        keyPart = sp + ' '.repeat(keyW) + sp;
-      }
-      out.push(
-        bdr('│') + sp + p(col.name, nameW) + sp +
-        bdr('│') + dim(sp + p(col.type, typeW) + sp) +
-        bdr('│') + keyPart +
-        bdr('│')
-      );
-    }
-    out.push(bot);
-    return out;
-  }
-
-  // Stack tables vertically, one per line, with a blank line between them
-  const output: string[] = [];
-  data.tables.forEach((t, ti) => {
-    const block = renderTable(t, allMetrics[ti], colorMap.get(t.name) ?? ERD_PALETTE[0]);
-    output.push(...block);
-    output.push('');
+  const diagram = buildErdDiagram(data, width, {
+    tables: theme.tables,
+    border: theme.border,
+    pk: theme.warning,
+    muted: theme.muted,
   });
 
-  return output.join('\n').trimEnd();
+  const lines = diagram.lines.map((spans) => spans.map(spanToAnsi).join(''));
+  lines.push('');
+  if (diagram.unrouted.length > 0) {
+    lines.push(c(WARN_COL, 'Not drawn (no room to route):'));
+    for (const r of diagram.unrouted) {
+      lines.push('  ' + `${r.table}.${r.columns.join(', ')}` + c(MUTED, ' → ') + `${r.refTable}`);
+    }
+    lines.push('');
+  }
+  const n = data.tables.length;
+  const m = data.relations.length;
+  lines.push(
+    c(MUTED, `${n} table${n === 1 ? '' : 's'} · ${m} relationship${m === 1 ? '' : 's'}  `) +
+      c(MUTED, '┼ one   ○ zero   ╱│╲ many'),
+  );
+  return lines.join('\n');
 }
 
 // ── AI explanation ────────────────────────────────────────────────────────────
 
 export function fmtAi(text: string, error: string | null): string {
-  const lines: string[] = [cbold(ACCENT, 'Explanation:'), ''];
-  if (error) {
-    lines.push(fmtError(error));
-  } else {
-    lines.push(c(AI_COL, text));
-  }
-  return lines.join('\n');
+  return error ? fmtError(error) : text.trim();
 }
 
 // ── Full entry ────────────────────────────────────────────────────────────────
@@ -333,34 +282,42 @@ export interface EntryData {
   aiError: string | null;
   shellOutput: string | null;
   erdData: ErdData | null;
+  /** What to echo as the user's input when it differs from `query` (e.g. `/next`). */
+  echo?: string;
+}
+
+const BODY_INDENT = '     ';
+
+/** Claude Code-style result block: `  ⎿  ` on the first line, hanging indent after. */
+export function fmtBody(body: string): string {
+  return body
+    .split('\n')
+    .map((line, i) => (i === 0 ? c(MUTED, '  ⎿  ') : line ? BODY_INDENT : '') + line)
+    .join('\n');
 }
 
 export function fmtEntry(entry: EntryData): string {
   const isShell = entry.query.startsWith('!');
-  const isCommand = !isShell && (entry.query.startsWith('/') || entry.query.startsWith('\\'));
-  const label = isShell ? 'Shell' : isCommand ? 'Command' : 'Query';
-
-  const lines: string[] = [' ' + fmtHeader(label, entry.query), ''];
+  const termWidth = process.stdout.columns ?? 80;
+  let body = '';
 
   if (isShell) {
-    if (entry.shellOutput !== null) lines.push(' ' + entry.shellOutput.replace(/\n/g, '\n '));
+    body = entry.shellOutput ?? '';
   } else if (entry.commandMessage) {
-    if (entry.commandMessage.helpData) {
-      lines.push(fmtHelp(entry.commandMessage.helpData).replace(/\n/g, '\n '));
-    } else if (entry.commandMessage.ok) {
-      lines.push(' ' + fmtOk(entry.commandMessage.text));
-    } else {
-      lines.push(' ' + fmtError(entry.commandMessage.text));
-    }
+    if (entry.commandMessage.helpData) body = fmtHelp(entry.commandMessage.helpData);
+    else if (entry.commandMessage.ok) body = fmtOk(entry.commandMessage.text);
+    else body = fmtError(entry.commandMessage.text);
   } else if (entry.erdData) {
-    lines.push(' ' + fmtErd(entry.erdData).replace(/\n/g, '\n '));
+    body = fmtErd(entry.erdData, termWidth - BODY_INDENT.length - 1);
   } else if (entry.aiResponse || entry.aiError) {
-    lines.push(' ' + fmtAi(entry.aiResponse, entry.aiError).replace(/\n/g, '\n '));
+    body = fmtAi(entry.aiResponse, entry.aiError);
   } else {
-    const result = fmtQueryResult(entry.queryState, entry.elapsed, entry.page, 50);
-    if (result) lines.push(' ' + result.replace(/\n/g, '\n '));
+    body = fmtQueryResult(entry.queryState, entry.elapsed, entry.page, 50);
   }
 
+  const echo = entry.echo ?? entry.query;
+  const lines = [fmtPromptEcho(echo)];
+  if (body) lines.push(fmtBody(body));
   lines.push('');
   return lines.join('\n');
 }

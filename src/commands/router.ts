@@ -44,7 +44,7 @@ export interface CommandContext {
   onChangeDatabase: (database: string) => void;
   onExport: (format: 'csv' | 'json') => void;
   onClear: () => void;
-  onErd: () => void;
+  onErd: (table?: string) => void;
   aliases: Record<string, string>;
   onSaveAlias: (name: string, query: string) => void;
   onDeleteAlias: (name: string) => boolean;
@@ -129,7 +129,7 @@ const COMMANDS: Record<string, Command> = {
     description: 'Toggle vim keybindings on/off',
     category: 'Session',
     usage: '/toggle-vim-mode',
-    detail: 'Switches the query input between standard editing and vim keybindings. In NORMAL mode use motions like w, b, 0, $, x, dd. Enter INSERT mode with i, a, A, I, o, O.',
+    detail: 'Switches the query input between standard editing and vim keybindings, matching Claude Code\'s vim mode: counts, motions (w e b 0 ^ $ gg G f t ; ,), operators with text objects (diw, ci", ya(), visual mode (v / V), undo (u) and repeat (.). Esc enters NORMAL mode; i a I A o O return to INSERT.',
     run: (ctx) => {
       const next = !ctx.vimEnabled;
       ctx.setVimEnabled(next);
@@ -316,12 +316,13 @@ const COMMANDS: Record<string, Command> = {
     },
   },
   'erd': {
-    description: 'Visualize tables and relationships as a schema diagram',
+    description: 'Draw an entity-relationship diagram of the schema',
     category: 'Schema',
-    usage: '/erd',
-    detail: 'Fetches all tables, columns, and foreign key relationships from the connected database and renders a color-coded schema diagram. Each table gets a unique color; FK references use the color of the table they point to.',
+    usage: '/erd [table]',
+    detail: 'Draws tables as boxes with relationship lines in crow\'s-foot notation: referenced tables sit above the tables that point at them. Line ends read ┼ one, ○ zero, ╱│╲ many — e.g. ┼┼ is "exactly one", ┼○ is "zero or one", ○╱│╲ is "zero or many". Lines are labelled with the foreign key column. Pass a table name to show only that table and its direct neighbours, which keeps large schemas readable.',
+    examples: ['/erd', '/erd orders'],
     run: (ctx) => {
-      ctx.onErd();
+      ctx.onErd(ctx.args.trim() || undefined);
       return { ok: true, message: '' };
     },
   },
