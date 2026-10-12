@@ -205,6 +205,12 @@ export function ConnectionWizard({ onConnect, initialError }: ConnectionWizardPr
         );
       })}
 
+      {fields.driver === 'sqlite' && (
+        <Text dimColor>
+          {' '.repeat(LABEL_WIDTH)}~/ and absolute paths work; relative paths start at {process.cwd()}
+        </Text>
+      )}
+
       <Box marginTop={1}>
         {connecting ? (
           <Text dimColor>Connecting…</Text>

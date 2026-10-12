@@ -2,6 +2,9 @@ import { Client } from 'pg';
 import { createConnection } from 'mysql2/promise';
 import type { RowDataPacket, FieldPacket, ResultSetHeader } from 'mysql2';
 import Database from 'better-sqlite3';
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { resolve } from 'node:path';
 import { savePassword } from '../config/keychain.js';
 
 export interface DbResult {
@@ -82,18 +85,29 @@ class SqliteDbClient implements DbClient {
   async end() { this.db.close(); }
 }
 
+export function resolveSqlitePath(input: string): string {
+  const trimmed = input.trim();
+  const expanded = trimmed === '~' || trimmed.startsWith('~/') ? homedir() + trimmed.slice(1) : trimmed;
+  return resolve(expanded);
+}
+
 export async function connectParams(params: ConnectionParams): Promise<ConnectionState> {
   try {
     if (params.driver === 'sqlite') {
-      const db = new Database(params.database);
+      if (!params.database.trim()) return { status: 'error', message: 'Enter the path to a SQLite database file.' };
+      const filePath = resolveSqlitePath(params.database);
+      // better-sqlite3 silently creates a new empty database for a missing path, which
+      // looks like a connected-but-empty schema; a typo should be an error instead.
+      if (!existsSync(filePath)) return { status: 'error', message: `SQLite file not found: ${filePath}` };
+      const db = new Database(filePath, { fileMustExist: true });
       return {
         status: 'connected',
         client: new SqliteDbClient(db),
-        database: params.database,
+        database: filePath,
         host: 'local',
         user: '',
         driver: 'sqlite',
-        params,
+        params: { ...params, database: filePath },
       };
     }
 
@@ -145,9 +159,9 @@ export async function connectParams(params: ConnectionParams): Promise<Connectio
 
 export async function connectDsn(dsn: string): Promise<ConnectionState> {
   try {
-    // SQLite: sqlite:///path or sqlite://./path
+    // SQLite: sqlite:///abs/path, sqlite://./rel/path, sqlite://~/path or sqlite:path
     if (dsn.startsWith('sqlite:')) {
-      const filePath = dsn.replace(/^sqlite:\/\//, '').replace(/^\//, '') || dsn.replace('sqlite:', '');
+      const filePath = dsn.startsWith('sqlite://') ? dsn.slice('sqlite://'.length) : dsn.slice('sqlite:'.length);
       return connectParams({ driver: 'sqlite', host: 'local', port: 0, database: filePath, user: '', password: '' });
     }
 
