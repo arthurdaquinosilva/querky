@@ -3,7 +3,7 @@ import { theme } from '../theme.js';
 
 const COL_PAD = 1;
 const HEADER_COLOR = theme.accent;
-const BORDER = '#9e9e9e';
+const BORDER = theme.border;
 const NULL_COLOR = theme.muted;
 
 const NULL_MARKER = '∅';

@@ -95,7 +95,7 @@ function Segments({ segs }: { segs: Segment[] }) {
           color={s.color}
           bold={s.bold}
           inverse={s.cursor}
-          backgroundColor={s.selected && !s.cursor ? theme.subtle : undefined}
+          backgroundColor={s.selected && !s.cursor ? theme.selection : undefined}
         >
           {s.text}
         </Text>
@@ -241,7 +241,7 @@ export function QueryInput({
   const shownText = searchShown !== null ? searchShown.replace(/^!\s*/, '') : (preview?.value ?? text);
   const shownCursor = isLoading || search ? null : (preview?.cursor ?? cursor);
 
-  const accent = shell ? theme.shellMode : theme.subtle;
+  const accent = shell ? theme.shellMode : theme.rule;
   const rule = '─'.repeat(Math.max(10, columns));
   const all = glyphs(shownText, searchShown !== null ? !searchShown.startsWith('!') && !searchShown.startsWith('/') : isSql);
   if (search) {

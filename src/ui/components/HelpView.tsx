@@ -9,7 +9,7 @@ export function HelpView({ data }: { data: HelpData }) {
     const { usage, description, psqlAlias, detail, example, examples } = data.entry;
     return (
       <Box flexDirection="column" marginTop={1}>
-        <Text bold color="white">{usage}{psqlAlias ? `  ${psqlAlias}` : ''}</Text>
+        <Text bold color={theme.fg}>{usage}{psqlAlias ? `  ${psqlAlias}` : ''}</Text>
         <Box marginTop={1}>
           <Text>{description}</Text>
         </Box>
@@ -45,7 +45,7 @@ export function HelpView({ data }: { data: HelpData }) {
             <Text bold color={theme.accent}>{group.category}</Text>
             {group.entries.map((entry) => (
               <Box key={entry.name} marginLeft={2}>
-                <Text color="white">{entry.usage.padEnd(USAGE_WIDTH)}</Text>
+                <Text color={theme.fg}>{entry.usage.padEnd(USAGE_WIDTH)}</Text>
                 <Text dimColor>{entry.description}</Text>
                 {entry.psqlAlias && <Text dimColor>  {entry.psqlAlias}</Text>}
               </Box>
