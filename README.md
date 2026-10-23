@@ -25,17 +25,25 @@ A quirky terminal SQL client with vim keybindings, schema-aware autocomplete, qu
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 22+
+- pnpm (or corepack, which ships with Node, to fetch it)
 
 ---
 
 ## Install
 
 ```bash
-npm install -g @deaquinodev/querky
+curl -fsSL https://raw.githubusercontent.com/arthurdaquinosilva/querky/main/install.sh | sh
 ```
 
-After that, `querky` is available globally.
+That downloads querky from GitHub into `~/.local/lib/querky`, builds it, and links the `querky` command in `~/.local/bin`. To update, run the installer again. Other options:
+
+```bash
+curl -fsSL .../install.sh | QUERKY_VERSION=v0.5.0 sh      # a specific tag or branch
+curl -fsSL .../install.sh | sh -s -- --uninstall          # remove it (settings, history and aliases are kept)
+```
+
+querky isn't on npm; GitHub is the only place it's published.
 
 ### Install from source
 
